@@ -1,77 +1,71 @@
-import { getEnv } from "../config/env";
-import { getRedis } from "./redis";
-import type { QuotaState } from "./weatherTypes";
+import type { Redis } from "ioredis";
+import { env } from "../config/env";
 
-export const QUOTA_REDIS_KEY = "weatherai:quota";
+export interface QuotaState {
+  limit: number;
+  remaining: number;
+  resetAt: number;
+}
 
-const HEADER_LIMIT = "x-ratelimit-limit";
-const HEADER_REMAINING = "x-ratelimit-remaining";
-const HEADER_RESET = "x-ratelimit-reset";
+const REDIS_KEY = "weatherai:quota:v1";
 
-export type HeaderSource =
-  | Headers
-  | { get(name: string): string | null | undefined }
-  | Record<string, string | string[] | undefined | null>;
+export function parseRateLimitHeaders(headers: Headers | Record<string, string | undefined>): QuotaState | null {
+  const get = (name: string): string | undefined =>
+    headers instanceof Headers ? headers.get(name) ?? undefined : headers[name] ?? headers[name.toLowerCase()];
 
-function readHeader(headers: HeaderSource, name: string): string | undefined {
-  if (typeof (headers as Headers).get === "function") {
-    const value = (headers as Headers).get(name);
-    return value == null || value === "" ? undefined : value;
+  const limitRaw = get("X-RateLimit-Limit");
+  const remainingRaw = get("X-RateLimit-Remaining");
+  const resetRaw = get("X-RateLimit-Reset");
+
+  if (limitRaw === undefined || remainingRaw === undefined || resetRaw === undefined) {
+    return null;
   }
 
-  const record = headers as Record<string, string | string[] | undefined | null>;
-  const key = Object.keys(record).find((candidate) => candidate.toLowerCase() === name);
-  if (!key) return undefined;
-  const value = record[key];
-  if (Array.isArray(value)) return value[0];
-  return value == null || value === "" ? undefined : value;
+  const limit = Number(limitRaw);
+  const remaining = Number(remainingRaw);
+  const resetAt = Number(resetRaw);
+
+  if (!Number.isFinite(limit) || !Number.isFinite(remaining) || !Number.isFinite(resetAt)) {
+    return null;
+  }
+
+  return { limit, remaining, resetAt };
 }
 
-function parseIntHeader(raw: string | undefined): number | undefined {
-  if (raw == null) return undefined;
-  const n = Number.parseInt(raw, 10);
-  return Number.isFinite(n) ? n : undefined;
-}
+export class QuotaTracker {
+  private readonly client: Redis;
+  private readonly safetyBuffer: number;
 
-export function parseRateLimitHeaders(headers: HeaderSource, now = new Date()): QuotaState | null {
-  const limit = parseIntHeader(readHeader(headers, HEADER_LIMIT));
-  const remaining = parseIntHeader(readHeader(headers, HEADER_REMAINING));
-  const resetAt = parseIntHeader(readHeader(headers, HEADER_RESET));
-  if (limit == null || remaining == null || resetAt == null) return null;
+  constructor(client: Redis, safetyBuffer: number = env.QUOTA_SAFETY_BUFFER) {
+    this.client = client;
+    this.safetyBuffer = safetyBuffer;
+  }
 
-  return {
-    limit,
-    remaining,
-    resetAt,
-    updatedAt: now.toISOString(),
-  };
-}
+  async recordFromHeaders(headers: Headers | Record<string, string | undefined>): Promise<QuotaState | null> {
+    const state = parseRateLimitHeaders(headers);
+    if (state) {
+      await this.client.set(REDIS_KEY, JSON.stringify(state));
+    }
+    return state;
+  }
 
-export async function saveQuota(state: QuotaState): Promise<void> {
-  const ttlSeconds = Math.max(state.resetAt - Math.floor(Date.now() / 1000), 60);
-  await getRedis().set(QUOTA_REDIS_KEY, JSON.stringify(state), "EX", ttlSeconds);
-}
+  async getState(): Promise<QuotaState | null> {
+    const raw = await this.client.get(REDIS_KEY);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as QuotaState;
+    } catch {
+      return null;
+    }
+  }
 
-export async function getQuota(): Promise<QuotaState | null> {
-  const raw = await getRedis().get(QUOTA_REDIS_KEY);
-  if (raw == null) return null;
-  return JSON.parse(raw) as QuotaState;
-}
+  async hasHeadroom(): Promise<boolean> {
+    const state = await this.getState();
+    if (!state) return true;
 
-export function hasQuotaHeadroom(
-  quota: QuotaState | null,
-  buffer = getEnv().QUOTA_SAFETY_BUFFER,
-  nowMs = Date.now(),
-): boolean {
-  if (!quota) return true;
-  if (quota.resetAt * 1000 <= nowMs) return true;
-  return quota.remaining > buffer;
-}
+    const now = Math.floor(Date.now() / 1000);
+    if (now >= state.resetAt) return true;
 
-export async function canIssueRequest(nowMs = Date.now()): Promise<{
-  allowed: boolean;
-  quota: QuotaState | null;
-}> {
-  const quota = await getQuota();
-  return { allowed: hasQuotaHeadroom(quota, getEnv().QUOTA_SAFETY_BUFFER, nowMs), quota };
+    return state.remaining - this.safetyBuffer > 0;
+  }
 }

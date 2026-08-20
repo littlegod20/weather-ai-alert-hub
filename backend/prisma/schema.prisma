@@ -1,47 +1,35 @@
-generator client {
-  provider     = "prisma-client"
-  output       = "../src/generated/prisma"
-  moduleFormat = "cjs"
-}
+ generator client {
+ provider = "prisma-client"
+ output   = "../src/generated/prisma"
+ }
 
 datasource db {
   provider = "postgresql"
 }
 
-enum Units {
-  metric
-  imperial
-}
-
 enum TriggerType {
-  rain
-  wind
-  frost
-  drought
-}
-
-enum PollOutcome {
-  cached
-  fetched
-  skipped_quota
-  error
+  RAIN
+  EXTREME_WIND
+  FROST
+  DROUGHT
 }
 
 model Location {
-  id           String        @id @default(cuid())
-  name         String?
-  lat          Float
-  lon          Float
-  units        Units         @default(metric)
-  triggerTypes TriggerType[]
-  active       Boolean       @default(true)
-  lastPolledAt DateTime?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  alerts       AlertEvent[]
-  pollLogs     PollLog[]
+  id        String        @id @default(cuid())
+  label     String
+  lat       Float
+  lon       Float
+  timezone  String        @default("UTC")
+  units     String        @default("metric")
+  triggers  TriggerType[]
+  active    Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
 
-  @@index([active, lastPolledAt])
+  alerts   AlertEvent[]
+  pollLogs PollLog[]
+
+  @@index([active])
 }
 
 model AlertEvent {
@@ -49,22 +37,29 @@ model AlertEvent {
   locationId  String
   location    Location    @relation(fields: [locationId], references: [id], onDelete: Cascade)
   triggerType TriggerType
-  reason      String
-  payload     Json
-  createdAt   DateTime    @default(now())
+  message     String
+  snapshot    Json
+  triggeredAt DateTime    @default(now())
 
-  @@index([locationId, createdAt])
+  @@index([locationId, triggeredAt])
 }
 
 model PollLog {
-  id              String      @id @default(cuid())
-  locationId      String
-  location        Location    @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  outcome         PollOutcome
-  cacheHit        Boolean     @default(false)
-  quotaRemaining  Int?
-  errorMessage    String?
-  createdAt       DateTime    @default(now())
+  id             String   @id @default(cuid())
+  locationId     String
+  location       Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  polledAt       DateTime @default(now())
+  cacheHit       Boolean
+  statusCode     Int
+  quotaRemaining Int?
 
-  @@index([locationId, createdAt])
+  @@index([locationId, polledAt])
+}
+
+model QuotaSnapshot {
+  id         String   @id @default(cuid())
+  recordedAt DateTime @default(now())
+  limitTotal Int
+  remaining  Int
+  resetAt    DateTime
 }

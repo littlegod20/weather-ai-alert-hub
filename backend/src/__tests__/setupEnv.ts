@@ -1,11 +1,4 @@
+process.env.WEATHERAI_API_KEY ??= "wai_test_key";
+process.env.DATABASE_URL ??= "postgresql://postgres:postgres@localhost:5432/weatherai_alert_hub_test";
+process.env.REDIS_URL ??= "redis://localhost:6379/1";
 process.env.NODE_ENV = "test";
-process.env.WEATHERAI_API_KEY = "wai_test";
-process.env.WEATHERAI_BASE_URL = "https://api.weather-ai.co";
-process.env.DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/weatherai_alert_hub";
-process.env.REDIS_URL = "redis://127.0.0.1:6379";
-process.env.QUOTA_SAFETY_BUFFER = "20";
-process.env.WEATHER_CACHE_TTL_SECONDS = "1500";
-process.env.SCHEDULER_TICK_SECONDS = "60";
-process.env.MIN_POLL_INTERVAL_SECONDS = "1500";
-process.env.PORT = "4000";
-process.env.LOG_LEVEL = "silent";

@@ -1,26 +1,11 @@
 import Redis from "ioredis";
-import { getEnv } from "../config/env";
+import { env } from "../config/env";
 
-export type RedisClient = Pick<Redis, "get" | "set" | "del" | "quit">;
-
-let client: RedisClient | null = null;
-
-export function getRedis(): RedisClient {
-  if (!client) {
-    client = new Redis(getEnv().REDIS_URL, {
-      maxRetriesPerRequest: 3,
-      enableReadyCheck: false,
-    });
-  }
-  return client;
+export function createRedisClient(): Redis {
+  return new Redis(env.REDIS_URL, {
+    maxRetriesPerRequest: 3,
+    retryStrategy: (times) => Math.min(times * 200, 2000),
+  });
 }
 
-export function setRedis(instance: RedisClient): void {
-  client = instance;
-}
-
-export async function closeRedis(): Promise<void> {
-  if (!client) return;
-  await client.quit();
-  client = null;
-}
+export const redis = createRedisClient();

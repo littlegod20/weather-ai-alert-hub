@@ -1,36 +1,45 @@
-import { getEnv } from "../config/env";
-import { getRedis } from "./redis";
-import type { Units, WeatherPayload } from "./weatherTypes";
+import type { Redis } from "ioredis";
+import { env } from "../config/env";
 
-export function roundCoord(value: number): string {
-  return value.toFixed(2);
+export interface WeatherCacheKeyParams {
+  lat: number;
+  lon: number;
+  units?: string;
+  days?: number;
 }
 
-export function weatherCacheKey(lat: number, lon: number, units: Units): string {
-  return `weather:${roundCoord(lat)}:${roundCoord(lon)}:${units}`;
+const KEY_PREFIX = "weatherai:cache:v1";
+
+function roundCoord(value: number): string {
+  return value.toFixed(4);
 }
 
-export async function getCachedWeather(
-  lat: number,
-  lon: number,
-  units: Units,
-): Promise<WeatherPayload | null> {
-  const raw = await getRedis().get(weatherCacheKey(lat, lon, units));
-  if (raw == null) return null;
-  return JSON.parse(raw) as WeatherPayload;
+export function buildCacheKey({ lat, lon, units = "metric", days }: WeatherCacheKeyParams): string {
+  const parts = [KEY_PREFIX, roundCoord(lat), roundCoord(lon), units];
+  if (days !== undefined) parts.push(String(days));
+  return parts.join(":");
 }
 
-export async function setCachedWeather(
-  lat: number,
-  lon: number,
-  units: Units,
-  payload: WeatherPayload,
-  ttlSeconds = getEnv().WEATHER_CACHE_TTL_SECONDS,
-): Promise<void> {
-  await getRedis().set(
-    weatherCacheKey(lat, lon, units),
-    JSON.stringify(payload),
-    "EX",
-    ttlSeconds,
-  );
+export class WeatherCache {
+  private readonly client: Redis;
+  private readonly ttlSeconds: number;
+
+  constructor(client: Redis, ttlSeconds: number = env.WEATHER_CACHE_TTL_SECONDS) {
+    this.client = client;
+    this.ttlSeconds = ttlSeconds;
+  }
+
+  async get<T>(params: WeatherCacheKeyParams): Promise<T | null> {
+    const raw = await this.client.get(buildCacheKey(params));
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  async set<T>(params: WeatherCacheKeyParams, value: T, ttlSeconds = this.ttlSeconds): Promise<void> {
+    await this.client.set(buildCacheKey(params), JSON.stringify(value), "EX", ttlSeconds);
+  }
 }

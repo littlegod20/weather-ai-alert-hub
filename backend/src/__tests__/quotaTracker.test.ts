@@ -1,109 +1,61 @@
-/// <reference types="vitest/globals" />
+import { describe, it, expect } from "vitest";
 import RedisMock from "ioredis-mock";
-import { getEnv, loadEnv, resetEnv } from "../config/env";
-import {
-  canIssueRequest,
-  getQuota,
-  hasQuotaHeadroom,
-  parseRateLimitHeaders,
-  saveQuota,
-} from "../lib/quotaTracker";
-import { setRedis } from "../lib/redis";
-import type { QuotaState } from "../lib/weatherTypes";
+import { QuotaTracker, parseRateLimitHeaders } from "../lib/quotaTracker";
 
-function quota(overrides: Partial<QuotaState> = {}): QuotaState {
-  return {
-    limit: 1000,
-    remaining: 50,
-    resetAt: Math.floor(Date.now() / 1000) + 86_400,
-    updatedAt: new Date().toISOString(),
-    ...overrides,
-  };
-}
-
-describe("quotaTracker", () => {
-  beforeEach(() => {
-    resetEnv();
-    loadEnv();
-    setRedis(new RedisMock());
-  });
-
-  it("parses X-RateLimit headers from a Headers object", () => {
+describe("parseRateLimitHeaders", () => {
+  it("parses valid headers from a Headers object", () => {
     const headers = new Headers({
-      "X-RateLimit-Limit": "1000",
-      "X-RateLimit-Remaining": "987",
+      "X-RateLimit-Limit": "50000",
+      "X-RateLimit-Remaining": "49987",
       "X-RateLimit-Reset": "1717977600",
     });
-
-    expect(parseRateLimitHeaders(headers, new Date("2026-01-01T00:00:00.000Z"))).toEqual({
-      limit: 1000,
-      remaining: 987,
-      resetAt: 1717977600,
-      updatedAt: "2026-01-01T00:00:00.000Z",
-    });
+    expect(parseRateLimitHeaders(headers)).toEqual({ limit: 50000, remaining: 49987, resetAt: 1717977600 });
   });
 
-  it("parses headers case-insensitively from a plain object", () => {
-    const parsed = parseRateLimitHeaders({
-      "x-ratelimit-limit": "1000",
-      "X-RATELIMIT-REMAINING": "12",
+  it("returns null when headers are missing", () => {
+    expect(parseRateLimitHeaders(new Headers())).toBeNull();
+  });
+
+  it("returns null on malformed numeric values", () => {
+    const headers = new Headers({
+      "X-RateLimit-Limit": "not-a-number",
+      "X-RateLimit-Remaining": "49987",
       "X-RateLimit-Reset": "1717977600",
     });
+    expect(parseRateLimitHeaders(headers)).toBeNull();
+  });
+});
 
-    expect(parsed).toMatchObject({ limit: 1000, remaining: 12, resetAt: 1717977600 });
+describe("QuotaTracker", () => {
+  it("is optimistic before any quota state is known", async () => {
+    const tracker = new QuotaTracker(new RedisMock() as any, 20);
+    expect(await tracker.hasHeadroom()).toBe(true);
   });
 
-  it("returns null when any rate-limit header is missing", () => {
-    expect(
-      parseRateLimitHeaders({
-        "X-RateLimit-Limit": "1000",
-        "X-RateLimit-Remaining": "10",
-      }),
-    ).toBeNull();
+  it("records quota state from headers", async () => {
+    const tracker = new QuotaTracker(new RedisMock() as any, 20);
+    const future = Math.floor(Date.now() / 1000) + 3600;
+    await tracker.recordFromHeaders(
+      new Headers({ "X-RateLimit-Limit": "1000", "X-RateLimit-Remaining": "30", "X-RateLimit-Reset": String(future) })
+    );
+    expect(await tracker.getState()).toEqual({ limit: 1000, remaining: 30, resetAt: future });
   });
 
-  it("allows a request when no quota has been observed yet", async () => {
-    await expect(canIssueRequest()).resolves.toEqual({ allowed: true, quota: null });
+  it("denies headroom once remaining drops within the safety buffer", async () => {
+    const tracker = new QuotaTracker(new RedisMock() as any, 20);
+    const future = Math.floor(Date.now() / 1000) + 3600;
+    await tracker.recordFromHeaders(
+      new Headers({ "X-RateLimit-Limit": "1000", "X-RateLimit-Remaining": "15", "X-RateLimit-Reset": String(future) })
+    );
+    expect(await tracker.hasHeadroom()).toBe(false);
   });
 
-  it("allows a request when remaining is above the safety buffer", () => {
-    expect(hasQuotaHeadroom(quota({ remaining: 21 }), 20)).toBe(true);
-  });
-
-  it("refuses a request when remaining is within the safety buffer", () => {
-    expect(hasQuotaHeadroom(quota({ remaining: 20 }), 20)).toBe(false);
-    expect(hasQuotaHeadroom(quota({ remaining: 0 }), 20)).toBe(false);
-  });
-
-  it("allows a request once the reset epoch is in the past", () => {
-    const resetAt = Math.floor(Date.now() / 1000) - 10;
-    expect(hasQuotaHeadroom(quota({ remaining: 0, resetAt }), 20)).toBe(true);
-  });
-
-  it("round-trips quota state through Redis", async () => {
-    const state = quota({ remaining: 42, resetAt: Math.floor(Date.now() / 1000) + 3600 });
-    await saveQuota(state);
-
-    await expect(getQuota()).resolves.toEqual(state);
-    await expect(canIssueRequest()).resolves.toEqual({ allowed: true, quota: state });
-  });
-
-  it("uses QUOTA_SAFETY_BUFFER from env when gating Redis state", async () => {
-    const previous = process.env.QUOTA_SAFETY_BUFFER;
-    process.env.QUOTA_SAFETY_BUFFER = "30";
-    resetEnv();
-    loadEnv();
-    expect(getEnv().QUOTA_SAFETY_BUFFER).toBe(30);
-
-    try {
-      await saveQuota(quota({ remaining: 30 }));
-      await expect(canIssueRequest()).resolves.toMatchObject({ allowed: false });
-
-      await saveQuota(quota({ remaining: 31 }));
-      await expect(canIssueRequest()).resolves.toMatchObject({ allowed: true });
-    } finally {
-      process.env.QUOTA_SAFETY_BUFFER = previous;
-      resetEnv();
-    }
+  it("treats a rolled-over reset window as fresh headroom", async () => {
+    const tracker = new QuotaTracker(new RedisMock() as any, 20);
+    const past = Math.floor(Date.now() / 1000) - 10;
+    await tracker.recordFromHeaders(
+      new Headers({ "X-RateLimit-Limit": "1000", "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": String(past) })
+    );
+    expect(await tracker.hasHeadroom()).toBe(true);
   });
 });
