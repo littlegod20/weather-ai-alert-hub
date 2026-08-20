@@ -17,25 +17,7 @@ The result: you can monitor a realistic number of locations on a $0 plan without
 
 ## Architecture
 
-┌─────────────┐ ┌──────────────┐ ┌────────────────┐
-│ Scheduler │────▶│ WeatherAI │────▶│ WeatherAI API │
-│ (node-cron) │ │ Client │ │ (api.weather- │
-│ │◀────│ (cache + │◀────│ ai.co) │
-└──────┬───────┘ │ quota-aware)│ └────────────────┘
-│ └──────┬───────┘
-│ │
-▼ ▼
-┌─────────────┐ ┌──────────────┐
-│ Trigger │ │ Redis │
-│ Evaluator │ │ (cache + │
-│ │ │ quota state)│
-└──────┬───────┘ └──────────────┘
-│
-▼
-┌─────────────┐ ┌──────────────┐
-│ PostgreSQL │◀───▶│ Express API │◀──── Frontend dashboard
-│ (Prisma) │ │ │
-└─────────────┘ └──────────────┘
+weatherai_alert_hub_architecture.png
 
 
 
