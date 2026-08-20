@@ -1,0 +1,70 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Units {
+  metric
+  imperial
+}
+
+enum TriggerType {
+  rain
+  wind
+  frost
+  drought
+}
+
+enum PollOutcome {
+  cached
+  fetched
+  skipped_quota
+  error
+}
+
+model Location {
+  id           String        @id @default(cuid())
+  name         String?
+  lat          Float
+  lon          Float
+  units        Units         @default(metric)
+  triggerTypes TriggerType[]
+  active       Boolean       @default(true)
+  lastPolledAt DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  alerts       AlertEvent[]
+  pollLogs     PollLog[]
+
+  @@index([active, lastPolledAt])
+}
+
+model AlertEvent {
+  id          String      @id @default(cuid())
+  locationId  String
+  location    Location    @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  triggerType TriggerType
+  reason      String
+  payload     Json
+  createdAt   DateTime    @default(now())
+
+  @@index([locationId, createdAt])
+}
+
+model PollLog {
+  id              String      @id @default(cuid())
+  locationId      String
+  location        Location    @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  outcome         PollOutcome
+  cacheHit        Boolean     @default(false)
+  quotaRemaining  Int?
+  errorMessage    String?
+  createdAt       DateTime    @default(now())
+
+  @@index([locationId, createdAt])
+}
