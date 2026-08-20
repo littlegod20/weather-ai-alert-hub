@@ -131,7 +131,10 @@ npm test
 
 ## Deployment
 
-Backend: Render or Railway (needs Postgres + Redis add-ons). Frontend: Vercel. Set `NEXT_PUBLIC_API_URL` on the frontend to the deployed backend URL before building. Live link: _TBD_.
+Backend: Railway (Postgres + Redis add-ons). Frontend: Vercel.
+
+- **Frontend:** https://weather-ai-alert-hub.vercel.app
+- **Backend API:** https://weather-ai-alert-hub-production.up.railway.app
 
 ## License
 

@@ -10,7 +10,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
+    "start:prod": "npm run migrate:deploy && npm run start"
   },
   "keywords": [],
   "author": "",
