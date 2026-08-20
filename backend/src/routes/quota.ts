@@ -7,15 +7,11 @@ export function createQuotaRouter(quotaTracker: QuotaTracker): Router {
   router.get("/", async (_req: Request, res: Response, next: NextFunction) => {
     try {
       const state = await quotaTracker.getState();
-      if (!state) {
-        res.json({ known: false, message: "No quota data yet, no WeatherAI request has been made this process." });
-        return;
-      }
       res.json({
-        known: true,
         limit: state.limit,
         remaining: state.remaining,
         resetAt: new Date(state.resetAt * 1000).toISOString(),
+        source: state.source,
       });
     } catch (err) {
       next(err);

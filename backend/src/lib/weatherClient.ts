@@ -74,6 +74,8 @@ export class WeatherAiClient {
   }
 
   private async requestWithRetry(params: GetWeatherParams, attempt = 0): Promise<WeatherApiResponse> {
+    await this.quota.recordRequest(); // count every real attempt, including retries
+    
     const response = await this.fetchImpl(this.buildUrl(params), {
       headers: { Authorization: `Bearer ${this.apiKey}` },
     });

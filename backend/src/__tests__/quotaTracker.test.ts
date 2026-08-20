@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import RedisMock from "ioredis-mock";
 import { QuotaTracker, parseRateLimitHeaders } from "../lib/quotaTracker";
 
@@ -27,35 +27,95 @@ describe("parseRateLimitHeaders", () => {
 });
 
 describe("QuotaTracker", () => {
-  it("is optimistic before any quota state is known", async () => {
-    const tracker = new QuotaTracker(new RedisMock() as any, 20);
-    expect(await tracker.hasHeadroom()).toBe(true);
+  let redis: any;
+
+  beforeEach(async () => {
+    if (!redis) redis = new RedisMock();
+    await redis.flushall();
   });
 
-  it("records quota state from headers", async () => {
-    const tracker = new QuotaTracker(new RedisMock() as any, 20);
-    const future = Math.floor(Date.now() / 1000) + 3600;
-    await tracker.recordFromHeaders(
-      new Headers({ "X-RateLimit-Limit": "1000", "X-RateLimit-Remaining": "30", "X-RateLimit-Reset": String(future) })
-    );
-    expect(await tracker.getState()).toEqual({ limit: 1000, remaining: 30, resetAt: future });
+  describe("self-tracked mode (the real path against WeatherAI's Free tier, which sends no quota headers)", () => {
+    it("reports full quota with zero requests recorded", async () => {
+      const tracker = new QuotaTracker(redis, 20, 1000);
+      const state = await tracker.getState();
+      expect(state).toEqual({ limit: 1000, remaining: 1000, resetAt: expect.any(Number), source: "self-tracked" });
+    });
+
+    it("decrements remaining as requests are recorded", async () => {
+      const tracker = new QuotaTracker(redis, 20, 1000);
+      await tracker.recordRequest();
+      await tracker.recordRequest();
+      await tracker.recordRequest();
+      const state = await tracker.getState();
+      expect(state.remaining).toBe(997);
+      expect(state.source).toBe("self-tracked");
+    });
+
+    it("has headroom while comfortably under the limit", async () => {
+      const tracker = new QuotaTracker(redis, 20, 1000);
+      await tracker.recordRequest();
+      expect(await tracker.hasHeadroom()).toBe(true);
+    });
+
+    it("denies headroom once remaining drops within the safety buffer", async () => {
+      const tracker = new QuotaTracker(redis, 5, 10);
+      for (let i = 0; i < 6; i++) await tracker.recordRequest();
+      expect(await tracker.hasHeadroom()).toBe(false);
+    });
+
+    it("never reports negative remaining if somehow over-recorded", async () => {
+      const tracker = new QuotaTracker(redis, 0, 2);
+      for (let i = 0; i < 5; i++) await tracker.recordRequest();
+      const state = await tracker.getState();
+      expect(state.remaining).toBe(0);
+    });
+
+    it("resets on a new calendar month (different Redis key)", async () => {
+      const tracker = new QuotaTracker(redis, 20, 1000);
+      const augustDate = new Date(Date.UTC(2026, 7, 20));
+      const septemberDate = new Date(Date.UTC(2026, 8, 1));
+
+      await tracker.recordRequest(augustDate);
+      await tracker.recordRequest(augustDate);
+
+      const augustState = await tracker.getState(augustDate);
+      const septemberState = await tracker.getState(septemberDate);
+
+      expect(augustState.remaining).toBe(998);
+      expect(septemberState.remaining).toBe(1000);
+    });
   });
 
-  it("denies headroom once remaining drops within the safety buffer", async () => {
-    const tracker = new QuotaTracker(new RedisMock() as any, 20);
-    const future = Math.floor(Date.now() / 1000) + 3600;
-    await tracker.recordFromHeaders(
-      new Headers({ "X-RateLimit-Limit": "1000", "X-RateLimit-Remaining": "15", "X-RateLimit-Reset": String(future) })
-    );
-    expect(await tracker.hasHeadroom()).toBe(false);
-  });
+  describe("header mode (defensive path, in case a plan ever sends X-RateLimit-* headers)", () => {
+    it("takes priority over the self-tracked count while still within its window", async () => {
+      const tracker = new QuotaTracker(redis, 20, 1000);
+      await tracker.recordRequest();
+      const future = Math.floor(Date.now() / 1000) + 3600;
+      await tracker.recordFromHeaders(
+        new Headers({ "X-RateLimit-Limit": "1000", "X-RateLimit-Remaining": "30", "X-RateLimit-Reset": String(future) })
+      );
+      const state = await tracker.getState();
+      expect(state).toEqual({ limit: 1000, remaining: 30, resetAt: future, source: "headers" });
+    });
 
-  it("treats a rolled-over reset window as fresh headroom", async () => {
-    const tracker = new QuotaTracker(new RedisMock() as any, 20);
-    const past = Math.floor(Date.now() / 1000) - 10;
-    await tracker.recordFromHeaders(
-      new Headers({ "X-RateLimit-Limit": "1000", "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": String(past) })
-    );
-    expect(await tracker.hasHeadroom()).toBe(true);
+    it("denies headroom once remaining drops within the safety buffer", async () => {
+      const tracker = new QuotaTracker(redis, 20);
+      const future = Math.floor(Date.now() / 1000) + 3600;
+      await tracker.recordFromHeaders(
+        new Headers({ "X-RateLimit-Limit": "1000", "X-RateLimit-Remaining": "15", "X-RateLimit-Reset": String(future) })
+      );
+      expect(await tracker.hasHeadroom()).toBe(false);
+    });
+
+    it("falls back to self-tracked once the header-reported window has passed", async () => {
+      const tracker = new QuotaTracker(redis, 20, 1000);
+      const past = Math.floor(Date.now() / 1000) - 10;
+      await tracker.recordFromHeaders(
+        new Headers({ "X-RateLimit-Limit": "1000", "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": String(past) })
+      );
+      const state = await tracker.getState();
+      expect(state.source).toBe("self-tracked");
+      expect(state.remaining).toBe(1000);
+    });
   });
 });

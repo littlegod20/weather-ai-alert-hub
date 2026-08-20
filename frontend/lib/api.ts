@@ -24,12 +24,11 @@ export interface AlertEvent {
 }
 
 export interface QuotaState {
-  known: boolean;
-  limit?: number;
-  remaining?: number;
-  resetAt?: string;
-  message?: string;
-}
+    limit: number;
+    remaining: number;
+    resetAt: string;
+    source: "headers" | "self-tracked";
+  }
 
 export interface LocationCreateInput {
   label: string;

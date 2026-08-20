@@ -9,6 +9,7 @@ const envSchema = z.object({
 
   WEATHERAI_API_KEY: z.string().min(1, "WEATHERAI_API_KEY is required"),
   WEATHERAI_BASE_URL: z.string().url().default("https://api.weather-ai.co"),
+  WEATHERAI_MONTHLY_LIMIT: z.coerce.number().int().positive().default(1000),
 
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   REDIS_URL: z.string().min(1, "REDIS_URL is required"),

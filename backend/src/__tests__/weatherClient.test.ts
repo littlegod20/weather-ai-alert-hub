@@ -91,7 +91,19 @@ describe("WeatherAiClient", () => {
     await client.getWeather({ lat: -1.2921, lon: 36.8219 });
 
     const state = await quota.getState();
-    expect(state?.remaining).toBe(42);
+    expect(state.remaining).toBe(42);
+    expect(state.source).toBe("headers");
+  });
+
+  it("falls back to self-tracked counting when WeatherAI sends no rate-limit headers (the real Free-tier case)", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(sampleResponse));
+    const { client, quota } = makeClient(fetchImpl, { redis });
+
+    await client.getWeather({ lat: -1.2921, lon: 36.8219 });
+
+    const state = await quota.getState();
+    expect(state.source).toBe("self-tracked");
+    expect(state.remaining).toBe(state.limit - 1);
   });
 
   it("refuses to call the API when quota headroom is exhausted, and never touches the network", async () => {

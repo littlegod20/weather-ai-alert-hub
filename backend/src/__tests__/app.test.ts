@@ -232,14 +232,15 @@ describe("GET /locations/:id/alerts", () => {
 });
 
 describe("GET /quota", () => {
-  it("reports unknown quota state before any WeatherAI request has happened", async () => {
+  it("reports a self-tracked full quota before any WeatherAI request has happened", async () => {
     const { app } = buildApp(redis);
     const res = await request(app).get("/quota");
     expect(res.status).toBe(200);
-    expect(res.body.known).toBe(false);
+    expect(res.body.source).toBe("self-tracked");
+    expect(res.body.remaining).toBe(res.body.limit);
   });
 
-  it("reports the recorded quota state", async () => {
+  it("prefers header-reported state over the self-tracked count when present", async () => {
     const { app, quotaTracker } = buildApp(redis);
     const future = Math.floor(Date.now() / 1000) + 3600;
     await quotaTracker.recordFromHeaders(
@@ -247,8 +248,18 @@ describe("GET /quota", () => {
     );
     const res = await request(app).get("/quota");
     expect(res.status).toBe(200);
-    expect(res.body.known).toBe(true);
+    expect(res.body.source).toBe("headers");
     expect(res.body.remaining).toBe(77);
+  });
+
+  it("falls back to the self-tracked count as requests are recorded", async () => {
+    const { app, quotaTracker } = buildApp(redis);
+    await quotaTracker.recordRequest();
+    await quotaTracker.recordRequest();
+    const res = await request(app).get("/quota");
+    expect(res.status).toBe(200);
+    expect(res.body.source).toBe("self-tracked");
+    expect(res.body.remaining).toBe(res.body.limit - 2);
   });
 });
 
