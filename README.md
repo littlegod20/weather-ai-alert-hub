@@ -17,9 +17,7 @@ The result: you can monitor a realistic number of locations on a $0 plan without
 
 ## Architecture
 
-weatherai_alert_hub_architecture.png
-
-
+![WeatherAI Alert Hub architecture](weatherai_alert_hub_architecture.png)
 
 **Data flow:** the scheduler wakes up every `SCHEDULER_TICK_SECONDS`, finds locations due for a poll (respecting `MIN_POLL_INTERVAL_SECONDS` per location), asks the WeatherAI client for current conditions (which serves from cache when possible and checks quota headroom before hitting the network), runs the result through the trigger evaluator against each location's configured trigger types, writes any matches to `AlertEvent`, and logs the poll outcome to `PollLog` for auditability.
 
