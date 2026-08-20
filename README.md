@@ -9,8 +9,8 @@ WeatherAI's own Webhooks feature (subscribe a URL, get a POST when rain/wind/fro
 So instead of polling naively, the backend:
 
 - **Caches** every weather response in Redis, keyed by rounded coordinates and units, with a configurable TTL (default 25 minutes), so repeated polls of the same location within that window cost zero API calls.
-- **Tracks quota** by parsing the `X-RateLimit-*` response headers WeatherAI returns on every call, persists the latest known state, and refuses to issue new requests once remaining quota drops within a configurable safety buffer.
-- **Backs off** with exponential retry on `429`/`500`/`503` responses instead of hammering the API when it's rate-limited or briefly unavailable.
+- **Tracks quota** by self-counting requests in Redis against `WEATHERAI_MONTHLY_LIMIT` (the Free tier's documented cap), and refuses to issue new requests once remaining quota drops within a configurable safety buffer. The WeatherAI Free tier returns no `X-RateLimit-*` headers, so header-based tracking is kept as a defensive fallback only.
+- **Backs off** with exponential retry on `429`/`500`/`502`/`503`/`504` responses instead of hammering the API when it's rate-limited or briefly unavailable.
 - **Spaces out polls per location** with a minimum interval, so adding more monitored locations degrades gracefully (fewer polls per location) instead of silently exhausting the monthly quota.
 
 The result: you can monitor a realistic number of locations on a $0 plan without hitting `429`s, and the code makes that design decision visible rather than hiding it.
@@ -19,7 +19,7 @@ The result: you can monitor a realistic number of locations on a $0 plan without
 
 ![WeatherAI Alert Hub architecture](weatherai_alert_hub_architecture.png)
 
-**Data flow:** the scheduler wakes up ev\ery `SCHEDULER_TICK_SECONDS`, finds locations due for a poll (respecting `MIN_POLL_INTERVAL_SECONDS` per location), asks the WeatherAI client for current conditions (which serves from cache when possible and checks quota headroom before hitting the network), runs the result through the trigger evaluator against each location's configured trigger types, writes any matches to `AlertEvent`, and logs the poll outcome to `PollLog` for auditability.
+**Data flow:** the scheduler wakes up every `SCHEDULER_TICK_SECONDS`, finds locations due for a poll (respecting `MIN_POLL_INTERVAL_SECONDS` per location), asks the WeatherAI client for current conditions (which serves from cache when possible and checks quota headroom before hitting the network), runs the result through the trigger evaluator against each location's configured trigger types, writes any matches to `AlertEvent`, saves the full weather snapshot to `PollLog` for visibility into current conditions, and logs the poll outcome for auditability.
 
 ## Tech stack
 
@@ -32,7 +32,7 @@ The result: you can monitor a realistic number of locations on a $0 plan without
 | Scheduling | node-cron | In-process polling, no external job infra needed for this scope |
 | Validation | Zod | Fails fast on bad env config or malformed request bodies |
 | Testing | Vitest + ioredis-mock + supertest | Redis-dependent logic tested without a live Redis instance |
-| Frontend | Next.js | Dashboard: locations, live status, trigger config, alert history |
+| Frontend | Next.js | Dashboard: locations, live status, trigger config, alert history, current conditions |
 
 ## Getting started
 
@@ -69,6 +69,7 @@ Fill in `WEATHERAI_API_KEY` with your key from the WeatherAI dashboard. Defaults
 |---|---|
 | `WEATHERAI_API_KEY` | Your Bearer token, `wai_...` |
 | `WEATHERAI_BASE_URL` | Defaults to `https://api.weather-ai.co` |
+| `WEATHERAI_MONTHLY_LIMIT` | Your plan's monthly request cap (Free tier: 1000) |
 | `DATABASE_URL` | Postgres connection string |
 | `REDIS_URL` | Redis connection string |
 | `SCHEDULER_TICK_SECONDS` | How often the scheduler checks for due polls |
@@ -79,8 +80,11 @@ Fill in `WEATHERAI_API_KEY` with your key from the WeatherAI dashboard. Defaults
 ### 4. Run migrations
 
 ```bash
-npx prisma migrate dev --name init
+npx prisma generate
+npx prisma migrate deploy
 ```
+
+Use `migrate deploy` for production and CI. Use `migrate dev` during local development when you want Prisma to also regenerate the client automatically.
 
 ### 5. Run it
 
@@ -108,7 +112,7 @@ npm test
 |---|---|---|
 | `POST` | `/locations` | Register a location with lat/lon, units, and trigger types to watch |
 | `GET` | `/locations` | List registered locations and their current status |
-| `GET` | `/locations/:id` | Get one location, including its latest poll result |
+| `GET` | `/locations/:id` | Get one location, including the latest poll snapshot (current conditions) |
 | `PATCH` | `/locations/:id` | Update trigger config, units, or active status |
 | `DELETE` | `/locations/:id` | Stop monitoring a location |
 | `GET` | `/locations/:id/alerts` | Alert history for a location |
@@ -117,19 +121,17 @@ npm test
 
 ## Project status
 
-This README documents the intended finished architecture. Build order, in progress:
-
 - [x] Env config, Prisma schema, Redis client, weather cache, quota tracker (tested)
-- [ ] WeatherAI HTTP client with retry/backoff (pending confirmation of the live `/v1/weather` response shape)
-- [ ] Trigger evaluator (rain/wind/frost/drought)
-- [ ] Scheduler
-- [ ] Express routes
-- [ ] Frontend dashboard
+- [x] WeatherAI HTTP client with retry/backoff
+- [x] Trigger evaluator (rain/wind/frost/drought)
+- [x] Scheduler
+- [x] Express routes
+- [x] Frontend dashboard with current conditions card and alert history
 - [ ] Deployment
 
 ## Deployment
 
-Backend: Render or Railway (needs Postgres + Redis add-ons). Frontend: Vercel. Live link: _TBD_.
+Backend: Render or Railway (needs Postgres + Redis add-ons). Frontend: Vercel. Set `NEXT_PUBLIC_API_URL` on the frontend to the deployed backend URL before building. Live link: _TBD_.
 
 ## License
 
