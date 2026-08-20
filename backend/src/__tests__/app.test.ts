@@ -51,15 +51,23 @@ class InMemoryLocationsRepo implements LocationsRepo {
 }
 
 class InMemoryAlertsRepo implements AlertsRepo {
-  constructor(private alerts: AlertEventRecord[] = []) {}
-
-  async findByLocation(locationId: string, limit: number, offset: number): Promise<AlertEventRecord[]> {
-    return this.alerts
-      .filter((a) => a.locationId === locationId)
-      .sort((a, b) => b.triggeredAt.getTime() - a.triggeredAt.getTime())
-      .slice(offset, offset + limit);
+    private idCounter = 0;
+  
+    constructor(public alerts: AlertEventRecord[] = []) {}
+  
+    async findByLocation(locationId: string, limit: number, offset: number): Promise<AlertEventRecord[]> {
+      return this.alerts
+        .filter((a) => a.locationId === locationId)
+        .sort((a, b) => b.triggeredAt.getTime() - a.triggeredAt.getTime())
+        .slice(offset, offset + limit);
+    }
+  
+    async create(input: { locationId: string; triggerType: string; message: string; snapshot: unknown }): Promise<AlertEventRecord> {
+      const record: AlertEventRecord = { id: `alert_${++this.idCounter}`, triggeredAt: new Date(), ...input };
+      this.alerts.push(record);
+      return record;
+    }
   }
-}
 
 function buildApp(redis: any) {
   const locationsRepo = new InMemoryLocationsRepo();
@@ -214,7 +222,7 @@ describe("GET /locations/:id/alerts", () => {
   it("returns alert history for an existing location", async () => {
     const { app, alertsRepo } = buildApp(redis);
     const created = await request(app).post("/locations").send(validBody);
-    (alertsRepo as any).alerts[0].locationId = created.body.id;
+    (alertsRepo as InMemoryAlertsRepo).alerts[0].locationId = created.body.id;
 
     const res = await request(app).get(`/locations/${created.body.id}/alerts`);
     expect(res.status).toBe(200);
