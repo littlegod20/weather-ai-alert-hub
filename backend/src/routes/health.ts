@@ -1,8 +1,11 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 
-export const healthRouter = Router();
+export function createHealthRouter(): Router {
+  const router = Router();
 
-healthRouter.get("/health", (req, res) => {
-  void req;
-  res.json({ ok: true });
-});
+  router.get("/", (_req: Request, res: Response) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
+  return router;
+}

@@ -1,57 +1,58 @@
-export const UNITS = ["metric", "imperial"] as const;
-export type Units = (typeof UNITS)[number];
-
-export const TRIGGER_TYPES = ["rain", "wind", "frost", "drought"] as const;
-export type TriggerType = (typeof TRIGGER_TYPES)[number];
-
-export type WeatherQuery = {
-  lat: number;
-  lon: number;
-  units?: Units;
-  days?: number;
-  /** WeatherAI includes Gemini summaries by default; we send false to preserve AI quota. */
-  ai?: boolean;
-};
+import { z } from "zod";
 
 /**
- * Opaque until a live GET /v1/weather body is captured and mapped.
- * Cache, quota, and HTTP plumbing do not depend on field names.
+ * Confirmed against a live /v1/weather response on 2026-08-20 for lat=-1.2921,
+ * lon=36.8219. Field names and weathercode values match the Open-Meteo schema
+ * (WMO weather interpretation codes), which is what WeatherAI appears to proxy.
+ * https://open-meteo.com/en/docs#weathervariables documents the full code table.
  */
-export type WeatherPayload = unknown;
 
-export type QuotaState = {
-  limit: number;
-  remaining: number;
-  resetAt: number;
-  updatedAt: string;
-};
+const currentWeatherSchema = z.object({
+  time: z.string(),
+  interval: z.number(),
+  temperature: z.number(),
+  windspeed: z.number(),
+  winddirection: z.number(),
+  is_day: z.union([z.literal(0), z.literal(1)]),
+  weathercode: z.number().int(),
+});
 
-export type WeatherFetchResult = {
-  source: "cache" | "network";
-  payload: WeatherPayload;
-  quota: QuotaState | null;
-};
+const dailyForecastEntrySchema = z.object({
+  date: z.string(),
+  temp_max: z.number(),
+  temp_min: z.number(),
+  precipitation: z.number(),
+  weathercode: z.number().int(),
+});
 
-export class QuotaExceededError extends Error {
-  readonly quota: QuotaState;
+const hourlyForecastEntrySchema = z.object({
+  time: z.string(),
+  temp: z.number(),
+  precipitation: z.number(),
+  weathercode: z.number().int(),
+});
 
-  constructor(quota: QuotaState) {
-    super(
-      `WeatherAI quota remaining (${quota.remaining}) is within the safety buffer; next reset at ${quota.resetAt}`,
-    );
-    this.name = "QuotaExceededError";
-    this.quota = quota;
-  }
-}
+export const weatherApiResponseSchema = z
+  .object({
+    lat: z.number(),
+    lon: z.number(),
+    units: z.string(),
+    days: z.number(),
+    current: currentWeatherSchema,
+    daily: z.array(dailyForecastEntrySchema),
+    hourly: z.array(hourlyForecastEntrySchema),
+    ai_summary: z.string().optional(),
+  })
+  .passthrough();
 
-export class WeatherApiError extends Error {
-  readonly status: number;
-  readonly body: unknown;
+export type CurrentWeather = z.infer<typeof currentWeatherSchema>;
+export type DailyForecastEntry = z.infer<typeof dailyForecastEntrySchema>;
+export type HourlyForecastEntry = z.infer<typeof hourlyForecastEntrySchema>;
+export type WeatherApiResponse = z.infer<typeof weatherApiResponseSchema>;
 
-  constructor(status: number, body: unknown) {
-    super(`WeatherAI request failed with status ${status}`);
-    this.name = "WeatherApiError";
-    this.status = status;
-    this.body = body;
-  }
+export interface GetWeatherParams {
+  lat: number;
+  lon: number;
+  days?: number;
+  units?: "metric" | "imperial";
 }
