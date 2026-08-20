@@ -127,7 +127,7 @@ npm test
 - [x] Scheduler
 - [x] Express routes
 - [x] Frontend dashboard with current conditions card and alert history
-- [ ] Deployment
+- [x] Deployment
 
 ## Deployment
 
