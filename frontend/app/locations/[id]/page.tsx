@@ -3,8 +3,22 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Clock, LoaderCircle, MapPin, Pause, Play, Trash2, TriangleAlert } from "lucide-react";
-import { api, ApiError, type Location, type AlertEvent } from "@/lib/api";
+import {
+  ArrowLeft,
+  Clock,
+  Droplets,
+  LoaderCircle,
+  MapPin,
+  Moon,
+  Pause,
+  Play,
+  Sun,
+  Thermometer,
+  Trash2,
+  TriangleAlert,
+  Wind,
+} from "lucide-react";
+import { api, ApiError, type Location, type AlertEvent, type CurrentConditions } from "@/lib/api";
 import { TriggerBadges } from "@/components/TriggerBadges";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +27,105 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 
 const PAGE_SIZE = 20;
+
+// WMO Weather Interpretation Codes — https://open-meteo.com/en/docs#weathervariables
+const WMO_DESCRIPTIONS: Record<number, string> = {
+  0: "Clear sky",
+  1: "Mainly clear",
+  2: "Partly cloudy",
+  3: "Overcast",
+  45: "Fog",
+  48: "Rime fog",
+  51: "Light drizzle",
+  53: "Moderate drizzle",
+  55: "Heavy drizzle",
+  61: "Light rain",
+  63: "Moderate rain",
+  65: "Heavy rain",
+  71: "Light snow",
+  73: "Moderate snow",
+  75: "Heavy snow",
+  77: "Snow grains",
+  80: "Light showers",
+  81: "Moderate showers",
+  82: "Heavy showers",
+  85: "Light snow showers",
+  86: "Heavy snow showers",
+  95: "Thunderstorm",
+  96: "Thunderstorm with hail",
+  99: "Thunderstorm with heavy hail",
+};
+
+function describeWeatherCode(code: number): string {
+  return WMO_DESCRIPTIONS[code] ?? `Weather code ${code}`;
+}
+
+function describeWindDirection(deg: number): string {
+  const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+  return dirs[Math.round(deg / 45) % 8] ?? "–";
+}
+
+function CurrentConditionsCard({
+  conditions,
+  units,
+  lastPolledAt,
+  aiSummary,
+}: {
+  conditions: CurrentConditions;
+  units: string;
+  lastPolledAt: string | null | undefined;
+  aiSummary?: string;
+}) {
+  const tempUnit = units === "imperial" ? "°F" : "°C";
+  const speedUnit = units === "imperial" ? "mph" : "km/h";
+  const isDay = conditions.is_day === 1;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center justify-between text-sm font-medium">
+          <span className="flex items-center gap-2">
+            {isDay ? <Sun className="size-4 text-yellow-500" /> : <Moon className="size-4 text-indigo-400" />}
+            Current conditions
+          </span>
+          {lastPolledAt && (
+            <span className="flex items-center gap-1 text-xs font-normal text-muted-foreground">
+              <Clock className="size-3" />
+              Last polled {new Date(lastPolledAt).toLocaleString()}
+            </span>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap gap-6">
+          <div className="flex items-center gap-2">
+            <Thermometer className="size-4 text-muted-foreground" />
+            <span className="text-2xl font-semibold">
+              {conditions.temperature}
+              {tempUnit}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Wind className="size-4" />
+            <span>
+              {conditions.windspeed} {speedUnit} {describeWindDirection(conditions.winddirection)}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary">{describeWeatherCode(conditions.weathercode)}</Badge>
+          </div>
+        </div>
+
+        {aiSummary && (
+          <div className="flex gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+            <Droplets className="mt-0.5 size-4 shrink-0" />
+            <p>{aiSummary}</p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function LocationDetailPage() {
   const params = useParams<{ id: string }>();
@@ -148,6 +261,21 @@ export default function LocationDetailPage() {
           <TriangleAlert />
           <AlertDescription>{error}</AlertDescription>
         </Alert>
+      )}
+
+      {location.lastPollSnapshot?.current ? (
+        <CurrentConditionsCard
+          conditions={location.lastPollSnapshot.current}
+          units={location.units}
+          lastPolledAt={location.lastPolledAt}
+          aiSummary={location.lastPollSnapshot.ai_summary}
+        />
+      ) : (
+        <Card>
+          <CardContent className="py-6 text-center text-sm text-muted-foreground">
+            No conditions data yet — waiting for the first poll.
+          </CardContent>
+        </Card>
       )}
 
       <section className="space-y-3">

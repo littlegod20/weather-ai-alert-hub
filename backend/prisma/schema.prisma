@@ -52,6 +52,7 @@ model PollLog {
   cacheHit       Boolean
   statusCode     Int
   quotaRemaining Int?
+  snapshot       Json?
 
   @@index([locationId, polledAt])
 }

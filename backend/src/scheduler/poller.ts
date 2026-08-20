@@ -60,6 +60,7 @@ export async function pollLocation(location: LocationRecord, deps: PollerDepende
       cacheHit: result.cacheHit,
       statusCode: 200,
       quotaRemaining: quotaState?.remaining ?? null,
+      snapshot: result.data,
     });
 
     if (matches.length > 0) {

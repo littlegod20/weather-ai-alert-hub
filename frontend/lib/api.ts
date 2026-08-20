@@ -1,6 +1,25 @@
 export const TRIGGER_TYPES = ["RAIN", "EXTREME_WIND", "FROST", "DROUGHT"] as const;
 export type TriggerType = (typeof TRIGGER_TYPES)[number];
 
+export interface CurrentConditions {
+  time: string;
+  interval: number;
+  temperature: number;
+  windspeed: number;
+  winddirection: number;
+  is_day: 0 | 1;
+  weathercode: number;
+}
+
+export interface PollSnapshot {
+  lat: number;
+  lon: number;
+  units: string;
+  days: number;
+  current: CurrentConditions;
+  ai_summary?: string;
+}
+
 export interface Location {
   id: string;
   label: string;
@@ -12,6 +31,8 @@ export interface Location {
   active: boolean;
   createdAt: string;
   updatedAt: string;
+  lastPollSnapshot?: PollSnapshot | null;
+  lastPolledAt?: string | null;
 }
 
 export interface AlertEvent {
@@ -24,11 +45,11 @@ export interface AlertEvent {
 }
 
 export interface QuotaState {
-    limit: number;
-    remaining: number;
-    resetAt: string;
-    source: "headers" | "self-tracked";
-  }
+  limit: number;
+  remaining: number;
+  resetAt: string;
+  source: "headers" | "self-tracked";
+}
 
 export interface LocationCreateInput {
   label: string;

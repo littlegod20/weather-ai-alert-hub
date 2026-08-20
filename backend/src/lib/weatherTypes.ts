@@ -41,7 +41,7 @@ export const weatherApiResponseSchema = z
     current: currentWeatherSchema,
     daily: z.array(dailyForecastEntrySchema),
     hourly: z.array(hourlyForecastEntrySchema),
-    ai_summary: z.string().optional(),
+    ai_summary: z.string().nullish(),
   })
   .passthrough();
 
