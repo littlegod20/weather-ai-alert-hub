@@ -93,7 +93,7 @@ export function QuotaBanner() {
         </div>
         <Progress
           value={usedPct}
-          className={low ? "**:data-[slot=progress-indicator]:bg-amber-500" : undefined}
+          className={low ? "h-3 **:data-[slot=progress-indicator]:bg-amber-500" : "h-3"}
         />
       </CardContent>
     </Card>
