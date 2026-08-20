@@ -143,8 +143,8 @@ describe("buildCronExpression", () => {
   });
 
   it("builds a minute-field expression for whole-minute ticks", () => {
-    expect(buildCronExpression(60)).toBe("* */1 * * * *");
-    expect(buildCronExpression(300)).toBe("* */5 * * * *");
+    expect(buildCronExpression(60)).toBe("0 */1 * * * *");
+    expect(buildCronExpression(300)).toBe("0 */5 * * * *");
   });
 
   it("throws on a non-divisible interval over a minute", () => {
@@ -318,6 +318,24 @@ describe("runPollCycle", () => {
     expect(result.outcomes[0].status).toBe("quota_exceeded");
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+});
+
+describe("buildCronExpression against the real node-cron parser", () => {
+  // Regression test for the exact bug found in production: the string-shape
+  // tests above never fed the expression to a real cron parser, so a wrong
+  // seconds field ("*" instead of "0") passed those tests while firing every
+  // second in practice. This test actually schedules it and counts ticks.
+  it("does not fire within ~2s for a 60s tick", async () => {
+    const cron = await import("node-cron");
+    const expression = buildCronExpression(60);
+    let calls = 0;
+    const task = cron.schedule(expression, () => {
+      calls++;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2200));
+    task.stop();
+    expect(calls).toBe(0);
+  }, 5000);
 });
 
 describe("startScheduler", () => {

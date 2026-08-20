@@ -140,7 +140,7 @@ export function buildCronExpression(tickSeconds: number): string {
     return `*/${tickSeconds} * * * * *`;
   }
   if (tickSeconds % 60 === 0) {
-    return `* */${tickSeconds / 60} * * * *`;
+    return `0 */${tickSeconds / 60} * * * *`;
   }
   throw new Error(
     `tickSeconds of ${tickSeconds} is neither under 60 nor a whole number of minutes, pick a value that divides evenly`
